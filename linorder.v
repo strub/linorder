@@ -12,6 +12,114 @@ Local Open Scope ring_scope.
 Delimit Scope order_scope with O.
 
 (* -------------------------------------------------------------------- *)
+Module POrder.
+Section ClassDef.
+
+Context {T : eqType}.
+
+Definition axiom (le : T -> T -> bool) :=
+  [/\ reflexive le, antisymmetric le & transitive le].
+
+Structure relf (ph : phant (T -> T -> bool)) := Pack { apply; _ : axiom apply }.
+Local Coercion apply : relf >-> Funclass.
+
+Variables (ph : phant (T -> T -> bool)) (f g : (T -> T -> bool)) (cF : relf ph).
+Definition class := let: Pack _ c as cF' := cF return axiom cF' in c.
+Definition clone fA of phant_id g (apply cF) & phant_id fA class :=
+  @Pack ph f fA.
+End ClassDef.
+
+Module Exports.
+Notation porder le := (axiom le).
+Coercion apply : relf >-> Funclass.
+Notation POrder fO := (Pack (Phant _) fO).
+Notation "{ 'porder' T }" := (relf (Phant (T -> T -> bool)))
+  (at level 0, format "{ 'porder'  T }") : ring_scope.
+Notation "[ 'porder' 'of' f 'as' g ]" := (@clone _ _ f g _ _ idfun id)
+  (at level 0, format "[ 'porder'  'of'  f  'as'  g ]") : form_scope.
+Notation "[ 'porder' 'of' f ]" := (@clone _ _ f f _ _ id id)
+  (at level 0, format "[ 'porder'  'of'  f ]") : form_scope.
+End Exports.
+End POrder.
+
+Include POrder.Exports.
+
+(* -------------------------------------------------------------------- *)
+Section POrderTheory.
+Context {T : eqType} (le : {porder T}).
+
+Lemma lexx : reflexive le.
+Proof. by case: (POrder.class le). Qed.
+
+Lemma le_asym : antisymmetric le.
+Proof. by case: (POrder.class le). Qed.
+
+Lemma le_trans : transitive le.
+Proof. by case: (POrder.class le). Qed.
+
+Lemma eq_le x y : (x == y) = (le x y && le y x).
+Proof.
+by apply/eqP/idP => [->|]; [rewrite lexx | apply/le_asym].
+Qed.
+End POrderTheory.
+
+(* -------------------------------------------------------------------- *)
+Module Order.
+Section ClassDef.
+Context {T : eqType}.
+
+Definition mixin_of (le : T -> T -> bool) :=
+  (forall x y, le x y || le y x).
+
+Record class_of f : Prop := Class { base : porder f; mixin : mixin_of f }.
+Local Coercion base : class_of >-> porder.
+
+Structure relf (ph : phant (T -> T -> bool)) := Pack { apply; _ : class_of apply }.
+Local Coercion apply : relf >-> Funclass.
+Variables (ph : phant (T -> T -> bool)) (f g : rel T) (cF : relf ph).
+
+Definition class := let: Pack _ c as cF' := cF return class_of cF' in c.
+
+Definition clone fM of phant_id g (apply cF) & phant_id fM class :=
+  @Pack ph f fM.
+
+Definition pack (fM : mixin_of f) :=
+  fun (bF : POrder.relf ph) fA & phant_id (POrder.class bF) fA =>
+  Pack ph (Class fA fM).
+
+Canonical porder := POrder.Pack ph class.
+End ClassDef.
+
+Module Exports.
+Notation total f := (mixin_of f).
+Notation order f := (class_of f).
+Coercion base : order >-> POrder.axiom.
+Coercion mixin : order >-> total.
+Coercion apply : relf >-> Funclass.
+Notation Order le := (Pack (Phant _) le).
+Notation AddOrder le := (pack le id).
+Notation "{ 'order' T }" := (relf (Phant (T -> T -> bool)))
+  (at level 0, format "{ 'order'  T }") : ring_scope.
+Notation "[ 'order' 'of' f 'as' g ]" := (@clone _ _ f g _ _ idfun id)
+  (at level 0, format "[ 'order'  'of'  f  'as'  g ]") : form_scope.
+Notation "[ 'order' 'of' f ]" := (@clone _ _ f f _ _ id id)
+  (at level 0, format "[ 'order'  'of'  f ]") : form_scope.
+Coercion porder : relf >-> POrder.relf.
+Canonical porder.
+End Exports.
+End Order.
+
+Include Order.Exports.
+
+(* -------------------------------------------------------------------- *)
+Section OrderTheory.
+Context {T : eqType} (le : {order T}).
+
+Lemma le_total : total le.
+Proof. by case: (Order.class le). Qed.
+End OrderTheory.
+
+(* -------------------------------------------------------------------- *)
 Section Extrema.
 Context {R : realDomainType} {I : finType} (P : pred I) (F : I -> R).
 
@@ -50,19 +158,36 @@ Qed.
 End Extrema.
 
 (* -------------------------------------------------------------------- *)
+Section PickRDomain.
+Context {R : realFieldType} (s : seq R) (b1 b2 : R).
+
+Hypothesis (lt_b1_b2 : b1 < b2).
+
+Lemma pick_in_range : {x : R | x \notin s & b1 < x < b2}.
+Proof.
+pose P i := b1 < tnth (in_tuple s) i < b2; case: (pickP P) => /= [i Pi|].
++ pose r : 'I__ := arg_minr (tnth (in_tuple s)) (ex_intro P _ Pi).
+  exists ((b1 + tnth (in_tuple s) r) / 2%:R); last first.
+    rewrite {}/r; case: arg_minrP => /= j /andP[lt gt] _.
+    by case: (midf_lt lt) => -> /ltr_trans; apply.
+  rewrite {}/r; case: arg_minrP => /= j Pj min {i Pi}.
+  apply/negP => /seq_tnthP[i] h; have Pi: P i.
+    rewrite /P -h; case/andP: Pj => [lt gt].
+    by case: (midf_lt lt) => -> /= /ltr_trans; apply.
+  have := min _ Pi; rewrite -{}h; case/andP: Pj => lt _.
+  by case/midf_lt: lt => _ h /(ltr_le_trans h); rewrite ltrr.
++ move=> h; exists ((b1 + b2) / 2%:R); last first.
+    by case/midf_lt: lt_b1_b2 => -> ->.
+  apply/negP => /seq_tnthP[i Pi]; move/(_ i): h.
+  by case/midf_lt: lt_b1_b2; rewrite /P -Pi => -> ->.
+Qed.
+End PickRDomain.
+
+(* -------------------------------------------------------------------- *)
 Section LinOrderNat.
-Context (le : rel nat).
+Context (le : {porder nat}).
 
 Local Notation "x <= y" := (le x y) : order_scope.
-
-Hypothesis lexx     : reflexive le.
-Hypothesis le_asym  : antisymmetric le.
-Hypothesis le_trans : transitive le.
-
-Lemma eq_le x y : (x == y) = ((x <= y)%O && (y <= x))%O.
-Proof.
-by apply/eqP/idP => [->|]; [rewrite lexx | apply/le_asym].
-Qed.
 
 Let P n (α : nat -> rat) := forall (i j : 'I_n), α i = α j -> i = j.
 Let Q n (α : nat -> rat) := forall (i j : 'I_n), (i <= j)%O -> α i <= α j.
@@ -102,7 +227,7 @@ have: { q : rat | -1 < q < 1 & [/\
       apply/eqP => /Pα eq_ji.
       have {eq_ji} j_Ep: j \in Ep by rewrite eq_ji.
       move: j_Ep j_En; rewrite !in_set => /andP[_ le1] /andP[_ le2].
-      have: (val j == n) by rewrite eq_le !(le1, le2).
+      have: (val j == n) by rewrite (eq_le le) /= !(le1, le2).
       by rewrite ltn_eqF // ltn_ord.
   case=> qn /andP[ge_qn le_qn] [qn_En qn_Ep].
   have: { q : rat | -1 < q <= 1 & [/\ q > qn &
@@ -119,22 +244,9 @@ have: { q : rat | -1 < q < 1 & [/\
   have qp_En (i : 'I_n): i \in En -> α i < qp.
   - by move=> i_En; apply/(ler_lt_trans (qn_En _ i_En)).
   have: { q : rat | qn < q < qp & forall i : 'I_n, q != α i }.
-  - case: (pickP (fun i : 'I_n => qn < α i < qp)) => /= [i cmp_αi|].
-    * have h: exists i : 'I_n, qn < α i < qp by exists i.
-      pose r := arg_minr (α \o val) h; pose s := (qn + α r) / 2%:R.
-      have cmp_s: qn < s < qp; first rewrite /s /r.
-        case: arg_minrP => /= j /andP[lt_qn_αj lt_αj_qp] _.
-        by case: (midf_lt lt_qn_αj) => ->/= /ltr_trans; apply.
-      exists s => // => j; apply/contraTneq: cmp_s.
-      rewrite /s /r; case: arg_minrP => /= k /andP[lt_αk gt_αk].
-      move/(_ j) => hj /esym αjE; move: hj.
-      rewrite αjE; case: (midf_lt lt_αk) => -> /= hk abs.
-      move/ltr_trans: hk => -/(_ _ gt_αk) {abs}/abs.
-      by rewrite lerNgt; case: (midf_lt lt_αk) => _ ->.
-    * move=> h; exists ((qn + qp) / 2%:R).
-        by case: (midf_lt lt_qn_qp) => -> ->.
-      move=> i; move/negbT: (h i); apply/contraNneq => <-.
-      by case: (midf_lt lt_qn_qp) => -> ->.
+  - pose s := [seq α i | i : 'I_n]; case: (pick_in_range s lt_qn_qp).
+    move=> /= q /mapP h cmp_q; exists q => // i.
+    by apply/negP=> /eqP qE; apply: h; exists i => //; rewrite mem_enum.
   case=> q /andP[lt_q gt_q] fresh_q; exists q; last split => //.
   - by rewrite (ler_lt_trans ge_qn lt_q) (ltr_le_trans gt_q le_qp).
   - by move=> i Epi; apply/(ltr_le_trans gt_q (qp_Ep _ Epi)).
@@ -205,6 +317,25 @@ by case/orP => [/eqP<-//|lt_np]; rewrite ih // extn_monoS.
 Qed.
 
 (* -------------------------------------------------------------------- *)
+Local Lemma extn_inj : injective extn.
+Proof. move=> m n.
+have h1: (m < (maxn m n).+1)%N by rewrite ltnS leq_maxl.
+have h2: (n < (maxn m n).+1)%N by rewrite ltnS leq_maxr.
+rewrite (extn_mono h1) (extn_mono h2) /=.
+case: extn_r => /= α [p1 p2 p3] /=; case: extend => β _ /=.
+case=> [h _ _] /(h (Ordinal h1) (Ordinal h2)).
+by move/val_eqP => /= /eqP; apply/pcan_inj/pickleK_inv.
+Qed.
+
+(* -------------------------------------------------------------------- *)
+Lemma linop_is_porder : POrder.axiom linop.
+Proof. split.
++ by move=> x; apply/lerr.
++ by move=> x y => /ler_asym; apply/extn_inj.
++ by move=> x y z; apply/ler_trans.
+Qed.
+
+(* -------------------------------------------------------------------- *)
 Lemma linop_extend n p : (n <= p)%O -> linop n p.
 Proof.
 move=> lo_np; rewrite /linop /=; pose r := (maxn n p).+1.
@@ -214,57 +345,72 @@ rewrite (extn_mono h1) (extn_mono h2); case: extn_r => /= α.
 by case=> [_ /(_ (Ordinal h1) (Ordinal h2)) h _]; apply/h.
 Qed.
 
+(* -------------------------------------------------------------------- *)
+Lemma linop_total : total linop.
+Proof. by move=> x y; apply/ler_total. Qed.
+
+(* -------------------------------------------------------------------- *)
+Canonical linop_porder := POrder linop_is_porder.
+Canonical linop_order  := AddOrder linop_total.
 End LinOrderNat.
 
 (* -------------------------------------------------------------------- *)
 Section LinOrderGen.
-Context {T : countType} (le : rel T).
+Context {T : countType} (le : {porder T}).
 
 Local Notation "x <= y" := (le x y) : order_scope.
 
-Hypothesis lexx     : reflexive le.
-Hypothesis le_asym  : antisymmetric le.
-Hypothesis le_trans : transitive le.
-
-Let S (m n : nat) :=
+Definition cntop (m n : nat) :=
   if m == n then true else
     if   (pickle_inv T m, pickle_inv T n) is (Some m, Some n)
     then (m <= n)%O
     else false.
 
-Theorem lin_order_countable :
-  { R : rel T | forall x y, (x <= y)%O -> R x y &
-        [/\ total R, reflexive R, antisymmetric R & transitive R] }.
-Proof using lexx le_asym le_trans.
-have Sxx : reflexive S by move=> x; rewrite /S; rewrite eqxx.
-have S_sym : antisymmetric S.
-+ move=> /= x y; rewrite /S eq_sym; case: eqP => // _.
-  case Ea: pickle_inv => [xa|]; case Eb: pickle_inv => [xb|] => //.
-  move/le_asym => h; rewrite -[x](@pickle_invK T) -[y](@pickle_invK T).
-  by rewrite Ea Eb /= h.
-have S_trans : transitive S.
-+ move=> /= x y z; rewrite /S; case: eqP => [<-|]; first by case: eqP.
-  move=> /eqP ne_yx; case: eqP => // [<-|]; first by rewrite (negbTE ne_yx).
+Lemma cntop_is_porder : POrder.axiom cntop.
+Proof. split.
++ by move=> x; rewrite /cntop; rewrite eqxx.
++ move=> x y; rewrite /cntop eq_sym; case: eqP => // _.
+  case Ea: pickle_inv => [xa|];
+    case Eb: pickle_inv => [xb|] => //; move/le_asym => h.
+  by rewrite -[x](@pickle_invK T) -[y](@pickle_invK T) Ea Eb /= h.
++ move=> x y z; rewrite /cntop; case: eqP => [<-|].
+    by case: eqP.
+  move=> /eqP ne_yx; case: eqP => // [<-|].
+    by rewrite (negbTE ne_yx).
   move=> /eqP ne_xz; case: eqP => // /eqP ne_yz.
   case Ey: (pickle_inv _ y) => [py|] //;
     case Ez: (pickle_inv _ z) => [pz|] //;
     case Ex: (pickle_inv _ x) => [px|] //.
   by apply/le_trans.
-pose linop := linop Sxx S_sym S_trans.
-exists [rel x y | linop (pickle x) (pickle y)]; last split.
-+ move=> x y le_xy /=; apply/linop_extend; rewrite /S.
-  by case: eqP => // _; rewrite !pickleK_inv.
-+ by move=> x y; apply/ler_total.
-+ by move=> x /=; apply/lerr.
-+ move=> x y /ler_asym; set m := pickle x; set n := pickle y.
-  have h1: (m < (maxn m n).+1)%N by rewrite ltnS leq_maxl.
-  have h2: (n < (maxn m n).+1)%N by rewrite ltnS leq_maxr.
-  rewrite (extn_mono Sxx S_sym S_trans h1).
-  rewrite (extn_mono Sxx S_sym S_trans h2).
-  move=> /=; case: extn_r => /= α [p1 p2 p3] /=.
-  case: extend => β _ /= [h _ _] /(h (Ordinal h1) (Ordinal h2)).
-  move/val_eqP => /= /eqP; rewrite /m /n.
-  by apply/pcan_inj/pickleK_inv.
-+ by move=> x y z /=; apply/ler_trans.
+Qed.
+
+Canonical cntop_porder := POrder cntop_is_porder.
+
+(* -------------------------------------------------------------------- *)
+Definition linopg (x y : T) :=
+  linop [porder of cntop] (pickle x) (pickle y).
+
+(* -------------------------------------------------------------------- *)
+Lemma linopg_is_porder : POrder.axiom linopg.
+Proof. split.
++ by move=> x /=; apply/lexx.
++ move=> x y /le_asym; set m := pickle x; set n := pickle y.
+  by move/(congr1 (pickle_inv T)); rewrite !pickleK_inv; case.
++ by move=> x y z /=; apply/le_trans.
+Qed.
+
+(* -------------------------------------------------------------------- *)
+Lemma linopg_is_total : total linopg.
+Proof. by move=> x y; apply/le_total. Qed.
+
+(* -------------------------------------------------------------------- *)
+Canonical linopg_porder := POrder linopg_is_porder.
+Canonical linopg_order  := AddOrder linopg_is_total.
+
+(* -------------------------------------------------------------------- *)
+Lemma linopg_extend : subrel le linopg.
+Proof.
+move=> x y h; apply/linop_extend => /=; rewrite /cntop.
+by case: eqP => // _; rewrite !pickleK_inv.
 Qed.
 End LinOrderGen.
